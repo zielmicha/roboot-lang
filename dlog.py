@@ -5,15 +5,15 @@ class TupleSet:
     def __init__(self):
         pass
 
-class Relation:
+class SimpleRelation:
     def __init__(self):
         self._add_callbacks = []
         self._remove_callbacks = []
-        self._step_done_callbacks = []
 
         self._tuples = set()
         self._changed = False
 
+        self._debug = False
         self._enable()
 
     def _enable(self):
@@ -21,22 +21,18 @@ class Relation:
 
     def _self_add(self, x):
         if x not in self._tuples:
+            if self._debug: print('add', self, x)
             self._changed = True
             self._tuples.add(x)
             for cb in self._add_callbacks:
                 cb(x)
 
     def _self_remove(self, x):
-        self._changed = True
-        self._tuples.remove(x)
-        for cb in self._remove_callbacks:
-            cb(x)
-
-    def _self_step_done(self):
-        if self._changed:
-            self._changed = False
-            for cb in self._step_done_callbacks:
-                cb()
+        if x in self._tuples:
+            self._changed = True
+            self._tuples.remove(x)
+            for cb in self._remove_callbacks:
+                cb(x)
 
     def iter(self): # TODO
         yield from sorted(self._tuples)
@@ -56,21 +52,16 @@ class Relation:
         for t in list(self._tuples):
             f(t)
 
-    def add_to_magic_set(self):
-        pass
-
-class DataRelation(Relation):
+class DataRelation(SimpleRelation):
     def __init__(self, arity):
         self.arity = arity
         super().__init__()
 
     def add(self, x):
         self._self_add(x)
-        self._self_step_done()
 
     def remove(self, x):
         self._self_remove(x)
-        self._self_step_done()
 
 def single(t):
     d = DataRelation(len(t))
@@ -87,15 +78,12 @@ def join_lists(a, b, join_k):
         for t2 in A.get(t[:join_k], []):
             yield t1 + t2[join_k:]
 
-class SimpleJoin(Relation):
+class SimpleJoin(SimpleRelation):
     def __init__(self, a, b, join_k):
         self.a = a
         self.b = b
         self.join_k = join_k
         self.arity = self.a.arity + self.b.arity - self.join_k
-
-        self._remove_a = set()
-        self._remove_b = set()
 
         super().__init__()
 
@@ -106,43 +94,24 @@ class SimpleJoin(Relation):
         self.b._add_callbacks.append(self.__b_added)
         self.b._remove_callbacks.append(self.__b_removed)
 
-        self.a._step_done_callbacks.append(self.__step_done)
-        self.b._step_done_callbacks.append(self.__step_done)
-
         self.b.run_for_all(self.__b_added)
         self.a.run_for_all(self.__a_added)
 
     def __a_added(self, t):
-        if t in self._remove_a:
-            self._remove_a.remove(t)
-
         for t1 in self.b.iter_with_prefix(t[:self.join_k]):
             self._self_add(t + t1[self.join_k:])
 
     def __a_removed(self, t):
-        self._remove_a.add(t)
+        for t1 in self.b.iter_with_prefix(t[:self.join_k]):
+            self.__remove_tuple_if_needed(t + t1[self.join_k:])
 
     def __b_added(self, t):
-        if t in self._remove_b:
-            self._remove_b.remove(t)
-
         for t1 in self.a.iter_with_prefix(t[:self.join_k]):
             self._self_add(t1 + t[self.join_k:])
 
     def __b_removed(self, t):
-        self._remove_b.add(t)
-
-    def __step_done(self):
-        # TODO: we can do better
-        for t in list(self._remove_a):
-            for t1 in self.b.iter_with_prefix(t[:self.join_k]):
-                self.__remove_tuple_if_needed(t + t1[self.join_k:])
-
-        for t in list(self._remove_b):
-            for t1 in self.a.iter_with_prefix(t[:self.join_k]):
-                self.__remove_tuple_if_needed(t1 + t[self.join_k:])
-
-        self._self_step_done()
+        for t1 in self.a.iter_with_prefix(t[:self.join_k]):
+            self.__remove_tuple_if_needed(t1 + t[self.join_k:])
 
     def __remove_tuple_if_needed(self, t):
         if t in self._tuples and not self.__contains(t):
@@ -165,7 +134,7 @@ def unproject(t, new_axes):
         r.append(t[i])
     return tuple(r)
 
-class SimpleProjection(Relation):
+class SimpleProjection(SimpleRelation):
     def __init__(self, a, new_axes):
         self.a = a
         self.new_axes = new_axes
@@ -176,7 +145,6 @@ class SimpleProjection(Relation):
     def _enable(self):
         self.a._add_callbacks.append(self.__added)
         self.a._remove_callbacks.append(self.__removed)
-        self.a._step_done_callbacks.append(self._self_step_done)
         self.a.run_for_all(self.__added)
 
     def __added(self, t):
@@ -185,35 +153,35 @@ class SimpleProjection(Relation):
     def __removed(self, t):
         self._self_remove(project(t, self.new_axes))
 
-class SimpleUnion(Relation):
-    def __init__(self, a, b):
-        self.arity = a.arity
-        self.a = a
-        self.b = b
-        assert self.a.arity == self.b.arity
+class SimpleUnion(SimpleRelation):
+    def __init__(self, rels=None, *, arity=None):
+        assert rels or arity is not None
+        self.arity = arity if arity is not None else rels[0].arity
+        self.rels = list(rels or [])
+        for r in rels: assert r.arity == self.arity
 
+        self.counts = collections.defaultdict(int)
         super().__init__()
 
     def _enable(self):
-        self.a._add_callbacks.append(self.__added)
-        self.a._remove_callbacks.append(self.__removed)
-        self.a._step_done_callbacks.append(self._self_step_done)
+        for r in self.rels:
+            r._add_callbacks.append(self.__added)
+            r._remove_callbacks.append(self.__removed)
 
-        self.b._add_callbacks.append(self.__added)
-        self.b._remove_callbacks.append(self.__removed)
-        self.b._step_done_callbacks.append(self._self_step_done)
-
-        self.b.run_for_all(self.__added)
-        self.a.run_for_all(self.__added)
+        for r in self.rels:
+            r.run_for_all(self.__added)
 
     def __added(self, t):
+        self.counts[t] += 1
         self._self_add(t)
 
     def __removed(self, t):
-        if not self.a.contains(t) and not self.b.contains(t):
+        self.counts[t] -= 1
+        if self.counts[t] == 0:
+            del self.counts[t]
             self._self_remove(t)
 
-class SimpleLink(Relation):
+class SimpleLink(SimpleRelation):
     def __init__(self, arity):
         self.arity = arity
         self.a = None
@@ -228,9 +196,7 @@ class SimpleLink(Relation):
         self.a = a
         self.a._add_callbacks.append(self.__added)
         self.a._remove_callbacks.append(self.__removed)
-        self.a._step_done_callbacks.append(self._self_step_done)
         self.a.run_for_all(self.__added)
-        self._self_step_done()
 
     def __added(self, t):
         self._self_add(t)
@@ -247,7 +213,7 @@ def _unproject(t, axes):
             res.append((t[i], ))
     return tuple(res)
 
-class SimpleUnprojection(Relation):
+class SimpleUnprojection(SimpleRelation):
     def __init__(self, a, arity, new_axes):
         self.a = a
         self.old_axes = [None] * arity
@@ -259,7 +225,6 @@ class SimpleUnprojection(Relation):
     def _enable(self):
         self.a._add_callbacks.append(self.__added)
         self.a._remove_callbacks.append(self.__removed)
-        self.a._step_done_callbacks.append(self._self_step_done)
         self.a.run_for_all(self.__added)
 
     def __added(self, t):
@@ -268,13 +233,156 @@ class SimpleUnprojection(Relation):
     def __removed(self, t):
         self._self_remove(_unproject(t, self.old_axes))
 
-class MagicRelation(Relation):
-    def __init__(self):
-        self._magic_set = DataRelation()
+class SimpleExternalFunction(SimpleRelation):
+    def __init__(self, *, a, has_value, f, f_arity):
+        self.a = a
+        self.f = f
+        self._has_value = has_value
+        self.f_arity = f_arity
+        self.arity = f_arity + 1
+
+        self._values = {}
+
         super().__init__()
 
-    def add_to_magic_set(self, r):
-        self._magic_set = SimpleUnion(r, self._magic_set)
+    def _enable(self):
+        self.a._add_callbacks.append(self.__added)
+        self.a._remove_callbacks.append(self.__removed)
+        self.a.run_for_all(self.__added)
+
+    def __added(self, t):
+        key = t[:self.f_arity]
+        value = self.f(*key)
+        if not self._has_value or t[-1] == value:
+            self._values[key] = value
+            self._self_add((*key, value))
+
+    def __removed(self, t):
+        if self._has_value:
+            self._self_remove(t)
+        else:
+            key = t[:self.f_arity]
+            self._self_remove((*key, self._values[key]))
+            del self._values[key]
+
+class Relation:
+    def __init__(self):
+        self._magic_sets = {}
+
+        super().__init__()
+
+    def __add_magic_set(self, mask, mask_magic_set):
+        pass
+
+    def filter(self, a):
+        result = self.masked_filter(a)
+        bad_resp = [ masked_a for mask, masked_a in result if not all(mask) ]
+        if bad_resp:
+            raise Exception('uninstantiated response %s' % bad_resp)
+
+        return result[0][1]
+    
+def reduce_masked(a):
+    by_mask = collections.defaultdict(list)
+    for mask, a_masked in a: by_mask[mask].append(a_masked)
+
+    return [
+        (mask, (lst[0] if len(lst) == 1 else SimpleUnion(lst)))
+        for mask, lst in by_mask.items()
+    ]
+
+def masked_projection(a, new_axes):
+    result = []
+    for mask, a_masked in a:
+        result.append((
+            tuple( mask[a] for a in new_axes ),
+            SimpleProjection(a_masked, new_axes),
+        ))
+
+    return reduce_masked(result)
+
+def simple_arbitrary_join(r_a, r_b, axes):
+    assert isinstance(r_a, SimpleRelation)
+    assert isinstance(r_b, SimpleRelation)
+    join_on = [ (a, b) for a, b in axes if a is not None and b is not None ]
+    join_on_a = [ a for a, b in join_on ]
+    join_on_b = [ b for a, b in join_on ]
+    join = SimpleJoin(
+        SimpleProjection(r_a, tuple(join_on_a) + tuple(range(r_a.arity))),
+        SimpleProjection(r_b, tuple(join_on_b) + tuple(range(r_b.arity))),
+        len(join_on)
+    )
+    return SimpleProjection(join, [ (a + len(join_on)) if a is not None else (b + len(join_on) + r_a.arity) for a, b in axes ])
+
+def _masked_intersect_prefix(prefix, a):
+    result = []
+    for mask, a_masked in a:
+        r_mask = tuple([ 1 for i in range(prefix.arity) ]) + mask[prefix.arity:]
+        r_masked = simple_arbitrary_join(prefix, a_masked, [
+            (i, i) if mask[i] else (i, None)
+            for i in range(prefix.arity)
+        ] + [
+            (None, i)
+            for i in range(prefix.arity, a_masked.arity)
+        ])
+        result.append((r_mask, r_masked))
+
+    return reduce_masked(result)
+
+class NotSimple(Relation):
+    def __init__(self, a):
+        self.a = a
+        self.arity = a.arity
+
+        super().__init__()
+
+    def masked_filter(self, f):
+        result = []
+        for mask, a_masked in f:
+            joined = simple_arbitrary_join(
+                self.a, a_masked,
+                [ (i, i if mask[i] else None) for i in range(self.arity) ]
+            )
+            result.append([
+                (1,) * self.arity,
+                joined
+            ])
+
+        return reduce_masked(result)
+
+def _masked_join(a, b, join_k):
+    result = []
+    for mask, b_masked in b:
+        joined = simple_arbitrary_join(
+            a, b_masked,
+            [ (i, i if mask[i] else None) for i in range(join_k) ]
+            + [ (i, None) for i in range(join_k, a.arity) ]
+            + [ (None, i) for i in range(join_k, b_masked.arity) ]
+        )
+        result.append((
+            (1,) * a.arity +  mask[join_k:],
+            joined
+        ))
+
+    return reduce_masked(result)
+
+class Join(Relation):
+    def __init__(self, a, b, join_k):
+        self.a = a
+        self.b = b
+        self.join_k = join_k
+        self.arity = self.a.arity + self.b.arity - self.join_k
+
+        super().__init__()
+
+    def masked_filter(self, f):
+        a_filtered = self.a.filter(masked_projection(f, tuple(range(self.a.arity))))
+
+        m_prefix = SimpleProjection(a_filtered, tuple(range(0, self.join_k)))
+        m = masked_projection(f, tuple(range(0, self.join_k)) + tuple(range(self.a.arity, self.arity)))
+
+        b_filtered = self.b.masked_filter(_masked_intersect_prefix(m_prefix, m))
+        return _masked_join(a_filtered, b_filtered, self.join_k)
 
 class Projection(Relation):
     def __init__(self, a, new_axes):
@@ -284,16 +392,30 @@ class Projection(Relation):
 
         super().__init__()
 
-    def _enable(self):
-        self.a._add_callbacks.append(self.__added)
-        self.a._remove_callbacks.append(self.__removed)
-        self.a._step_done_callbacks.append(self._self_step_done)
-        self.a.add_to_magic_set(_unproject_relation(self._magic_set, self.new_axes))
+    def masked_filter(self, f):
+        return masked_projection(
+            self.a.masked_filter(f), self.new_axes)
 
-        self.a.run_for_all(self.__added)
+class ExternalFunction(Relation):
+    def __init__(self, func, f_arity):
+        self.func = func
+        self.f_arity = f_arity
+        self.arity = f_arity + 1
 
-    def __added(self, t):
-        self._self_add(project(t, self.new_axes))
+        super().__init__()
 
-    def __removed(self, t):
-        self._self_remove(project(t, self.new_axes))
+    def masked_filter(self, f):
+        result = []
+
+        for mask, f_masked in f:
+            assert len(mask) == self.arity
+
+            if not all(mask[:self.f_arity]):
+                result.append(((0,) * self.arity, DataRelation(arity=self.arity)))
+            else:
+                has_value = mask[-1] == 1
+                result.append(((1,) * self.arity, SimpleExternalFunction(
+                    a=f_masked, f=self.func,
+                    f_arity=self.f_arity, has_value=has_value)))
+
+        return reduce_masked(result)
