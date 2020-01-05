@@ -8,10 +8,10 @@ class SimpleTests(unittest.TestCase):
         foo.add((1, 3))
 
         foo_p = dlog.SimpleProjection(foo, (1, 0))
-        self.assertEqual(foo_p.to_set(), { (2, 1), (3, 1) })
+        dlog.sync(); self.assertEqual(foo_p.to_set(), { (2, 1), (3, 1) })
 
         foo.add((2, 4))
-        self.assertEqual(foo_p.to_set(), { (2, 1), (3, 1), (4, 2) })
+        dlog.sync(); self.assertEqual(foo_p.to_set(), { (2, 1), (3, 1), (4, 2) })
 
     def test_join(self):
         foo = dlog.DataRelation(arity=2)
@@ -23,13 +23,13 @@ class SimpleTests(unittest.TestCase):
         bar.add((2, 102))
 
         foo_p = dlog.SimpleJoin(foo, bar, join_k=1)
-        self.assertEqual(foo_p.to_set(), { (2, 202, 102), (1, 201, 101) })
+        dlog.sync(); self.assertEqual(foo_p.to_set(), { (2, 202, 102), (1, 201, 101) })
 
         foo.add((3, 203))
-        self.assertEqual(foo_p.to_set(), { (2, 202, 102), (1, 201, 101) })
+        dlog.sync(); self.assertEqual(foo_p.to_set(), { (2, 202, 102), (1, 201, 101) })
 
         bar.add((3, 103))
-        self.assertEqual(foo_p.to_set(), { (2, 202, 102), (1, 201, 101), (3, 203, 103) })
+        dlog.sync(); self.assertEqual(foo_p.to_set(), { (2, 202, 102), (1, 201, 101), (3, 203, 103) })
 
     def test_external_function(self):
         foo = dlog.DataRelation(arity=2)
@@ -37,7 +37,7 @@ class SimpleTests(unittest.TestCase):
         foo.add((2, 20, None))
 
         res = dlog.SimpleExternalFunction(f=(lambda a, b: a+b), a=foo, has_value=False, f_arity=2)
-        self.assertEqual(res.to_set(), { (1, 10, 11), (2, 20, 22) })
+        dlog.sync(); self.assertEqual(res.to_set(), { (1, 10, 11), (2, 20, 22) })
 
         foo = dlog.DataRelation(arity=2)
         foo.add((1, 10, 11))
@@ -46,7 +46,7 @@ class SimpleTests(unittest.TestCase):
         foo.add((3, 30, 23))
 
         res = dlog.SimpleExternalFunction(f=(lambda a, b: a+b), a=foo, has_value=True, f_arity=2)
-        self.assertEqual(res.to_set(), { (1, 10, 11), (2, 20, 22) })
+        dlog.sync(); self.assertEqual(res.to_set(), { (1, 10, 11), (2, 20, 22) })
 
     def test_simple_arbitrary_join(self):
         foo = dlog.DataRelation(arity=2)
@@ -60,7 +60,7 @@ class SimpleTests(unittest.TestCase):
         foo_p = dlog.simple_arbitrary_join(foo, bar, [
             (0, None), (1, 0), (None, 1)
         ])
-        self.assertEqual(foo_p.to_set(), { (1, 101, 201), (2, 102, 202) })
+        dlog.sync(); self.assertEqual(foo_p.to_set(), { (1, 101, 201), (2, 102, 202) })
 
     def test_masked_intersect_prefix(self):
         pref = dlog.DataRelation(arity=2)
@@ -79,7 +79,7 @@ class SimpleTests(unittest.TestCase):
             ((1,1,1), rel1),
             ((1,0,1), rel2),
         ])
-        self.assertEqual({ k:v.to_set() for k, v in r } , {
+        dlog.sync(); self.assertEqual({ k:v.to_set() for k, v in r } , {
             (1, 1, 1): { (1, 2, 3), (1, 2, 5), (1, 3, 5) }
         })
 
@@ -91,7 +91,7 @@ class SimpleTests(unittest.TestCase):
             ((1,0,1), rel2),
             ((1,0,0), rel3),
         ])
-        self.assertEqual({ k:v.to_set() for k, v in r } , {
+        dlog.sync(); self.assertEqual({ k:v.to_set() for k, v in r } , {
             (1, 1, 1): { (1, 2, 3), (1, 2, 5), (1, 3, 5) },
             (1, 1, 0): { (1, 2, None), (1, 3, None) },
         })
@@ -111,22 +111,12 @@ class SimpleTests(unittest.TestCase):
             transitive,
             edges
         ]))
-        self.assertEqual(transitive_closure.to_set(), edges.to_set())
+        dlog.sync(); self.assertEqual(transitive_closure.to_set(), edges.to_set())
         edges.add((2, 3))
-        self.assertEqual(transitive_closure.to_set(), edges.to_set() | { (1,3), (1, 4), (2, 4) })
+        dlog.sync(); self.assertEqual(transitive_closure.to_set(), edges.to_set() | { (1,3), (1, 4), (2, 4) })
         edges.remove((2, 3))
-        self.assertEqual(transitive_closure.to_set(), edges.to_set())
 
-    def test_unprojection(self):
-        foo = dlog.DataRelation(arity=2)
-        foo.add((1, 2))
-        foo.add((1, 3))
-
-        foo_p = dlog.SimpleUnprojection(foo, 3, (1, 0))
-        self.assertEqual(foo_p.to_set(), { ((2,), (1,), ()), ((3,), (1,), ()) })
-
-        foo.add((2, 4))
-        self.assertEqual(foo_p.to_set(), { ((2,), (1,), ()), ((3,), (1,), ()), ((4,), (2,), ()) })
+        dlog.sync(); self.assertEqual(transitive_closure.to_set(), edges.to_set())
 
 class OnDemandTests(unittest.TestCase):
     def test_join_data(self):
@@ -144,13 +134,14 @@ class OnDemandTests(unittest.TestCase):
         foo_s = foo_p.filter([
             ((0, 0, 0), dlog.single((None, None, None)))
         ])
-        self.assertEqual(foo_s.to_set(), { (2, 202, 102), (1, 201, 101) })
+
+        dlog.sync(); self.assertEqual(foo_s.to_set(), { (2, 202, 102), (1, 201, 101) })
 
         foo.add((3, 203))
-        self.assertEqual(foo_s.to_set(), { (2, 202, 102), (1, 201, 101), (3, 203, 302) })
+        dlog.sync(); self.assertEqual(foo_s.to_set(), { (2, 202, 102), (1, 201, 101), (3, 203, 302) })
 
         bar.add((3, 103))
-        self.assertEqual(foo_s.to_set(), { (2, 202, 102), (1, 201, 101), (3, 203, 103), (3, 203, 302) })
+        dlog.sync(); self.assertEqual(foo_s.to_set(), { (2, 202, 102), (1, 201, 101), (3, 203, 103), (3, 203, 302) })
 
     def test_external_function(self):
         foo = dlog.DataRelation(arity=2)
@@ -159,7 +150,7 @@ class OnDemandTests(unittest.TestCase):
 
         res = dlog.ExternalFunction(func=(lambda a, b: a+b), f_arity=2)
         res_f = res.filter([ ((1,1,0), foo) ])
-        self.assertEqual(res_f.to_set(), { (1, 10, 11), (2, 20, 22) })
+        dlog.sync(); self.assertEqual(res_f.to_set(), { (1, 10, 11), (2, 20, 22) })
 
         foo = dlog.DataRelation(arity=2)
         foo.add((1, 10, 11))
@@ -168,7 +159,7 @@ class OnDemandTests(unittest.TestCase):
         foo.add((3, 30, 23))
 
         res_f = res.filter([ ((1,1,1), foo) ])
-        self.assertEqual(res_f.to_set(), { (1, 10, 11), (2, 20, 22) })
+        dlog.sync(); self.assertEqual(res_f.to_set(), { (1, 10, 11), (2, 20, 22) })
 
 if __name__ == '__main__':
     unittest.main()

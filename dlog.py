@@ -1,9 +1,16 @@
-import collections, dataclasses
+import collections, dataclasses, functools
 from typing import Any
+from dlog_common import *
 
-class TupleSet:
-    def __init__(self):
-        pass
+_action_queue = collections.deque()
+
+def run_later(f, *args):
+    _action_queue.append(functools.partial(f, *args))
+
+def sync():
+    while _action_queue:
+        f = _action_queue.popleft()
+        f()
 
 class SimpleRelation:
     def __init__(self):
@@ -25,14 +32,14 @@ class SimpleRelation:
             self._changed = True
             self._tuples.add(x)
             for cb in self._add_callbacks:
-                cb(x)
+                run_later(cb, x)
 
     def _self_remove(self, x):
         if x in self._tuples:
             self._changed = True
             self._tuples.remove(x)
             for cb in self._remove_callbacks:
-                cb(x)
+                run_later(cb, x)
 
     def iter(self): # TODO
         yield from sorted(self._tuples)
@@ -122,6 +129,9 @@ class SimpleJoin(SimpleRelation):
         t2 = t[:self.join_k] + t[self.a.arity:]
         return self.a.contains(t1) and self.b.contains(t2)
 
+    def get_origins(self, t):
+        return [ [ (self.a, t[self.a.arity]), (self.b, t[:self.join_k] + t[self.a.arity:]) ] ]
+
 def project(t, new_axes):
     r = []
     for i in new_axes:
@@ -153,6 +163,9 @@ class SimpleProjection(SimpleRelation):
     def __removed(self, t):
         self._self_remove(project(t, self.new_axes))
 
+    # def get_origins(self, t):
+    #     pass # ???
+
 class SimpleUnion(SimpleRelation):
     def __init__(self, rels=None, *, arity=None):
         assert rels or arity is not None
@@ -181,6 +194,12 @@ class SimpleUnion(SimpleRelation):
             del self.counts[t]
             self._self_remove(t)
 
+    @genlist
+    def get_origins(self, t):
+        for r in rels:
+            if r.contains(r):
+                yield (r, t)
+
 class SimpleLink(SimpleRelation):
     def __init__(self, arity):
         self.arity = arity
@@ -204,6 +223,12 @@ class SimpleLink(SimpleRelation):
     def __removed(self, t):
         self._self_remove(t)
 
+    def get_origins(self, t):
+        if self.a is None:
+            return []
+        else:
+            return self.a.get_origins(t)
+
 def _unproject(t, axes):
     res = []
     for i in axes:
@@ -213,25 +238,6 @@ def _unproject(t, axes):
             res.append((t[i], ))
     return tuple(res)
 
-class SimpleUnprojection(SimpleRelation):
-    def __init__(self, a, arity, new_axes):
-        self.a = a
-        self.old_axes = [None] * arity
-        for i, j in enumerate(new_axes): self.old_axes[j] = i
-        self.arity = arity
-
-        super().__init__()
-
-    def _enable(self):
-        self.a._add_callbacks.append(self.__added)
-        self.a._remove_callbacks.append(self.__removed)
-        self.a.run_for_all(self.__added)
-
-    def __added(self, t):
-        self._self_add(_unproject(t, self.old_axes))
-
-    def __removed(self, t):
-        self._self_remove(_unproject(t, self.old_axes))
 
 class SimpleExternalFunction(SimpleRelation):
     def __init__(self, *, a, has_value, f, f_arity):
