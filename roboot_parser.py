@@ -6,37 +6,37 @@ from typing import Any, List, Tuple, Dict, Optional
 
 def token(t):
     def f(text):
-        if text and text[0].type == t: yield (), text[1:]
+        if text and text[0].type == t: return (), text[1:]
     return combinator(f)
 
 def token_s(t):
     def f(text):
-        if text and text[0].type == t: yield (text[0].string,), text[1:]
+        if text and text[0].type == t: return (text[0].string,), text[1:]
     return combinator(f)
 
 def op(s):
     def f(text):
-        if text and text[0].type == tokenize.OP and text[0].string == s: yield (), text[1:]
+        if text and text[0].type == tokenize.OP and text[0].string == s: return (), text[1:]
     return combinator(f)
 
 def op_s(s):
     def f(text):
-        if text and text[0].type == tokenize.OP and text[0].string in s: yield (text[0].string, ), text[1:]
+        if text and text[0].type == tokenize.OP and text[0].string in s: return (text[0].string, ), text[1:]
     return combinator(f)
 
 def keyword_s(s):
     def f(text):
-        if text and text[0].type == tokenize.NAME and text[0].string in s: yield (text[0].string, ), text[1:]
+        if text and text[0].type == tokenize.NAME and text[0].string in s: return (text[0].string, ), text[1:]
     return combinator(f)
 
 def keyword(s):
     def f(text):
-        if text and text[0].type == tokenize.NAME and text[0].string == s: yield (), text[1:]
+        if text and text[0].type == tokenize.NAME and text[0].string == s: return (), text[1:]
     return combinator(f)
 
 def name():
     def f(text):
-        if text and text[0].type == tokenize.NAME: yield (text[0].string,), text[1:]
+        if text and text[0].type == tokenize.NAME: return (text[0].string,), text[1:]
     return combinator(f)
 
 ERelationArg = (
@@ -89,6 +89,10 @@ class IfStmt:
     branches: List[Tuple[Any, Any]]
     else_branch: Optional[Any]
 
+@dataclass
+class StmtList:
+    stmts: List[Any]
+
 EExpr = ForwardDecl()
 
 EFuncArg = (
@@ -101,7 +105,7 @@ EFuncArgs = joined_with(op(','), EFuncArg)
 EIdent = token_s(tokenize.NAME)
 
 EExprAtom = (
-    #(op('(') + EExpr + op(')')) |
+    (op('(') + EExpr + op(')')) |
     token_s(tokenize.NUMBER).map(lambda a: (NumberConst(a[0]), )) |
     EIdent
 )
@@ -117,8 +121,8 @@ EExprCall.value = (
     EExprAtom + many(op('(') + EFuncArgs + op(')'))
 ).map(make_expr_call)
 
-EExprOp = by_priority(EExprAtom, [ # EExprCall
-    #keyword_s(['or', 'and', 'in', 'is']),
+EExprOp = by_priority(EExprCall, [
+    keyword_s(['or', 'and', 'in', 'is']),
     op_s(['<','>','==','>=','<=','<>','!=']),
     op_s(['+', '-']),
     op_s(['*', '/', '//']),
@@ -141,7 +145,7 @@ EStmt = ForwardDecl()
 
 ESuite = (
     ESimpleStmt |
-    (token(tokenize.NEWLINE) + token(tokenize.INDENT) + many(EStmt, 1).wrap() + token(tokenize.DEDENT))
+    (token(tokenize.NEWLINE) + token(tokenize.INDENT) + many(EStmt, 1).wrap() + token(tokenize.DEDENT)).map(lambda x: (StmtList(x), ))
 )
 
 def make_if(e):
@@ -181,15 +185,11 @@ def parse(cat, text):
     return parsercombinators.run(cat, [ t for t in tokens if t.type not in (tokenize.ENCODING, ) ])
 
 if __name__ == '__main__':
-    # print(list(parse(ERelationHead, 'relation foo(xoxo, zoo)')))
-    # print(list(parse(EExpr, '1 + 2 * 3')))
-    # print(list(parse(EExpr, '(1 + 2) is 3')))
-    # print(list(parse(EStmt, '1 + 2 * 3')))
-    # print(list(parse(EStmt, 'print(5); print(10)')))
-    # print(list(parse(EStmt, 'if 0: 5')))
-
-    #for i in range(100):
-    #    list(parse(EStmt, 'print(5); print(10)'))
-    import sys
-    sys.setrecursionlimit(10000)
-    print(parse(EExpr, '+'.join(['1'] * 10)))
+    print(parse(ERelationHead, 'relation foo(xoxo, zoo)'))
+    print(parse(EExpr, '1 + 2 * 3'))
+    print(parse(EExpr, '(1 + 2) is 3'))
+    print(parse(EStmt, '1 + 2 * 3'))
+    print(parse(EStmt, 'print(5); print(10)'))
+    print(parse(EStmt, 'if 0: 5'))
+    print(parse(EStmt, 'if 0:\n  5\n  6'))
+    #print(parse(EStmt, 'if 0:' + '\n  5'*500))
