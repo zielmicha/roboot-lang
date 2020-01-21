@@ -88,17 +88,21 @@ def nothing():
 inf = float('inf')
 
 def many(op, n_min=0, n_max=inf):
-    if n_min == 0 and n_max == inf:
-        # optimization
-        this = ForwardDecl()
-        this.value = (op + this) | nothing()
-        return this
+    def f(text):
+        result = []
 
-    x = (op + lazy_combinator(lambda: many(op, n_min - 1, n_max - 1)))
-    if n_min <= 0:
-        return x | nothing()
-    else:
-        return x
+        while True:
+            res = op._run(text)
+            if res is None: break
+            value, text = res
+            result += value
+
+        if len(result) < n_min or len(result) > n_max:
+            return None
+
+        return tuple(result), text
+
+    return Combinator(f)
 
 def optional(x):
     return many(x, 0, 1)
@@ -162,5 +166,5 @@ if __name__ == '__main__':
     # text = 'f'*10 + 'e'
     inner = joined_with(char('+'), char('f'))
     cat = joined_with(char('*'), inner) + char('e')
-    text = '+'.join(['f'] * 7) + 'e'
+    text = '+'.join(['f'] * 1000) + 'e'
     print(run(cat, text))
