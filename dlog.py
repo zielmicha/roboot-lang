@@ -425,3 +425,45 @@ class ExternalFunction(Relation):
                     f_arity=self.f_arity, has_value=has_value)))
 
         return reduce_masked(result)
+
+class SimpleEq(SimpleRelation):
+    def __init__(self):
+        self.arity = 2
+
+        super().__init__()
+
+    def _enable(self):
+        self.a._add_callbacks.append(self.__added)
+        self.a._remove_callbacks.append(self.__removed)
+        self.a.run_for_all(self.__added)
+
+    def __added(self, t):
+        if t[0] == t[1]:
+            self._self_add(t)
+
+    def __removed(self, t):
+        if t[0] == t[1]:
+            self._self_remove(t)
+
+class Eq(Relation):
+    def __init__(self):
+        self.arity = 2
+
+        super().__init__()
+
+    def masked_filter(self, f):
+        result = []
+
+        for mask, f_masked in f:
+            if mask == (0, 0):
+                # is this correct?
+                result.append(((0, 0), DataRelation(arity=2)))
+            elif mask == (1, 0):
+                result.append(((1, 1), SimpleProjection(f_masked, (0, 0))))
+            elif mask == (0, 1):
+                result.append(((1, 1), SimpleProjection(f_masked, (1, 1))))
+            elif mask == (1, 1):
+                result.append(((1, 1), SimpleEq()))
+            else: assert 0
+
+        return reduce_masked(result)

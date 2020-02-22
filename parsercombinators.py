@@ -90,14 +90,18 @@ inf = float('inf')
 def many(op, n_min=0, n_max=inf):
     def f(text):
         result = []
+        count = 0
 
         while True:
+            if count == n_max: break
+
             res = op._run(text)
             if res is None: break
             value, text = res
             result += value
+            count += 1
 
-        if len(result) < n_min or len(result) > n_max:
+        if count < n_min or count > n_max:
             return None
 
         return tuple(result), text
@@ -162,9 +166,13 @@ if __name__ == '__main__':
             if text and text[0] == c: return (c,), text[1:]
         return combinator(f)
 
+    print(run(optional(char('f')), ''))
+    print(run(optional(char('f')), 'f'))
+    print(run(optional(char('f')), 'ff'))
+
     # cat = many(char('f')) + char('e')
     # text = 'f'*10 + 'e'
     inner = joined_with(char('+'), char('f'))
     cat = joined_with(char('*'), inner) + char('e')
     text = '+'.join(['f'] * 1000) + 'e'
-    print(run(cat, text))
+    #print(run(cat, text))

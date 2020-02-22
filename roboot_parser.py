@@ -1,4 +1,4 @@
-import tokenize, io
+import tokenize, io, ast
 from parsercombinators import combinator, ForwardDecl, joined_with, optional, many
 import parsercombinators
 from dataclasses import dataclass
@@ -43,22 +43,40 @@ ERelationArg = (
     name()
 )
 
-ERelationHead = (
-    keyword('relation') + name() + op('(') + optional(joined_with(op(','), ERelationArg)).wrap() + op(')')
-)
+@dataclass
+class AstNode:
+    pass
 
 @dataclass
-class Op:
+class RelationHead(AstNode):
+    name: str
+    args: List[Any]
+
+@dataclass
+class RelationDef(AstNode):
+    head: RelationHead
+    body: Any
+
+ERelationHead = (
+    keyword('relation') + name() + op('(') + optional(joined_with(op(','), ERelationArg)).wrap() + op(')')
+).map(lambda x: (RelationHead(name=x[0], args=x[1]),))
+
+@dataclass
+class Op(AstNode):
     op: str
     left: Any
     right: Any
 
 @dataclass
-class NumberConst:
+class Const(AstNode):
     val: str
 
 @dataclass
-class Call:
+class Ident(AstNode):
+    val: str
+
+@dataclass
+class Call(AstNode):
     ident: Any
     args: Any
 
@@ -75,22 +93,22 @@ def by_priority(inner, ops):
     return inner
 
 @dataclass
-class FuncArg:
+class FuncArg(AstNode):
     value: Any
     keyword_arg_name: Optional[str]
 
 @dataclass
-class FuncCall:
+class FuncCall(AstNode):
     func: Any
     args: List[FuncArg]
 
 @dataclass
-class IfStmt:
+class IfStmt(AstNode):
     branches: List[Tuple[Any, Any]]
     else_branch: Optional[Any]
 
 @dataclass
-class StmtList:
+class StmtList(AstNode):
     stmts: List[Any]
 
 EExpr = ForwardDecl()
@@ -106,8 +124,8 @@ EIdent = token_s(tokenize.NAME)
 
 EExprAtom = (
     (op('(') + EExpr + op(')')) |
-    token_s(tokenize.NUMBER).map(lambda a: (NumberConst(a[0]), )) |
-    EIdent
+    token_s(tokenize.NUMBER).map(lambda a: (Const(val=ast.literal_eval(a[0])), )) |
+    EIdent.map(lambda a: (Ident(a[0]), ))
 )
 
 EExprCall = ForwardDecl()
@@ -134,9 +152,9 @@ EExpr.value = (
 )
 
 ERelation = (
-    ERelationHead,
-    keyword('='),
-    EExpr,
+    ERelationHead +
+    op('=') +
+    EExpr
 )
 
 ESimpleStmt = ForwardDecl()
@@ -169,7 +187,8 @@ EWhileStmt = keyword('while') + EExpr + op(':') + ESuite + optional(keyword('els
 ESmallStmt = (
     EExpr |
     (EExpr + op_s(['+=', '-=', '*=', '@=', '/=', '%=', '&=', '^=',
-                   '<<=', '>>=', '**=', '//=']) + EExpr)
+                   '<<=', '>>=', '**=', '//=']) + EExpr) |
+    ERelation
 )
 
 ESimpleStmt.value = joined_with(op(';'), ESmallStmt) + token(tokenize.NEWLINE)
@@ -181,10 +200,12 @@ EStmt.value = (
 
 def parse(cat, text):
     tokens = list(tokenize.tokenize(io.BytesIO(text.encode()).readline))
+    #print(tokens)
     cat = cat + optional(token(tokenize.NEWLINE)) + token(tokenize.ENDMARKER)
     return parsercombinators.run(cat, [ t for t in tokens if t.type not in (tokenize.ENCODING, ) ])
 
 if __name__ == '__main__':
+    print(parse(ERelationHead, 'relation foo()'))
     print(parse(ERelationHead, 'relation foo(xoxo, zoo)'))
     print(parse(EExpr, '1 + 2 * 3'))
     print(parse(EExpr, '(1 + 2) is 3'))
@@ -192,4 +213,5 @@ if __name__ == '__main__':
     print(parse(EStmt, 'print(5); print(10)'))
     print(parse(EStmt, 'if 0: 5'))
     print(parse(EStmt, 'if 0:\n  5\n  6'))
+    print(parse(ERelation, 'relation foo() = xoo'))
     #print(parse(EStmt, 'if 0:' + '\n  5'*500))
